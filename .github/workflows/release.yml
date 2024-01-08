@@ -117,8 +117,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       HAS_DOCKER_CREDS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
-      DOCKER_IMAGE_NAME: ${{ env.DOCKER_IMAGE_NAME || 'nebula' }}
-      DOCKER_IMAGE_TAG: ${{ env.DOCKER_IMAGE_TAG || 'latest' }}
     # XXX It's not possible to write a conditional here, so instead we do it on every step
     #if: ${{ env.HAS_DOCKER_CREDS == 'true' }}
     steps:
@@ -148,6 +146,9 @@ jobs:
 
       - name: Build and push images
         if: ${{ env.HAS_DOCKER_CREDS == 'true' }}
+        env:
+          DOCKER_IMAGE_NAME: ${{ env.DOCKER_IMAGE_NAME || 'nebula' }}
+          DOCKER_IMAGE_TAG: ${{ env.DOCKER_IMAGE_TAG || 'latest' }}
         run: |
           make DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME}" DOCKER_BUILD_ARGS="--push" all-docker
 
