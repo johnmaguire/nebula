@@ -15,4 +15,5 @@ RUN chmod +x /main.sh
 
 VOLUME ["/config"]
 
-CMD ["/main.sh"]
+ENTRYPOINT ["/main.sh"]
+CMD ["-config", "/config/config.yml"]
