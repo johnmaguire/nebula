@@ -115,10 +115,11 @@ jobs:
     # want to investigate and restart the build
     needs: [build-linux, build-darwin, build-windows, build-freebsd]
     runs-on: ubuntu-latest
-    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     env:
+      HAS_DOCKER_CREDS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
       DOCKER_IMAGE_NAME: ${{ env.DOCKER_IMAGE_NAME || 'nebula' }}
       DOCKER_IMAGE_TAG: ${{ env.DOCKER_IMAGE_TAG || 'latest' }}
+    if: ${{ env.HAS_DOCKER_CREDS == 'true' }}
     steps:
       # Be sure to checkout the code before downloading artifacts, or they will
       # be overwritten
