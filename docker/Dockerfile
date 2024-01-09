@@ -15,5 +15,7 @@ RUN chmod +x /main.sh
 
 VOLUME ["/config"]
 
+# Run nebula using a wrapper script to setup the tun device
 ENTRYPOINT ["/main.sh"]
+# Allow users to override the args passed to nebula
 CMD ["-config", "/config/config.yml"]
