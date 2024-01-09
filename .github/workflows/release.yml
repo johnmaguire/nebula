@@ -147,10 +147,10 @@ jobs:
       - name: Build and push images
         if: ${{ env.HAS_DOCKER_CREDS == 'true' }}
         env:
-          DOCKER_IMAGE_NAME: ${{ env.DOCKER_IMAGE_NAME || 'nebula' }}
+          DOCKER_IMAGE_REPO: ${{ env.DOCKER_IMAGE_REPO || 'nebulaoss/nebula' }}
           DOCKER_IMAGE_TAG: ${{ env.DOCKER_IMAGE_TAG || 'latest' }}
         run: |
-          make BUILD_NUMBER="${GITHUB_REF#refs/tags/v}" DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME}" DOCKER_BUILD_ARGS="--push" all-docker
+          make BUILD_NUMBER="${GITHUB_REF#refs/tags/v}" DOCKER_IMAGE_REPO="${DOCKER_IMAGE_REPO}" DOCKER_BUILD_ARGS="--push" all-docker
 
   release:
     name: Create and Upload Release
