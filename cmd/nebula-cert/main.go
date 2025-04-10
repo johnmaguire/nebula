@@ -63,6 +63,8 @@ func main() {
 	switch args[0] {
 	case "ca":
 		err = ca(args[1:], os.Stdout, os.Stderr, StdinPasswordReader{})
+	case "encrypt-ca":
+		err = encryptCa(args[1:], os.Stdout, os.Stderr, StdinPasswordReader{})
 	case "keygen":
 		err = keygen(args[1:], os.Stdout, os.Stderr)
 	case "sign":
@@ -96,6 +98,8 @@ func handleError(mode string, e error, out io.Writer) int {
 		switch mode {
 		case "ca":
 			caHelp(out)
+		case "encrypt-ca":
+			encryptCaHelp(out)
 		case "keygen":
 			keygenHelp(out)
 		case "sign":
