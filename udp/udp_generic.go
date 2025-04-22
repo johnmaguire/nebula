@@ -77,7 +77,7 @@ func (u *GenericConn) ListenOut(r EncReader) {
 		// Just read one packet at a time
 		n, rua, err := u.ReadFromUDPAddrPort(buffer)
 		if err != nil {
-			u.l.WithError(err).Debug("udp socket is closed, exiting read loop")
+			u.l.WithError(err).Error("udp socket is closed, exiting read loop")
 			return
 		}
 
