@@ -47,6 +47,18 @@ const (
 	TerminalType
 )
 
+// Promotion metrics. TryPromoteBest is gated on a packet counter rather than a timer, so a
+// low traffic tunnel can sit on a relay for a long time before it is ever probed. These track
+// how often promotion is attempted, how many probes that costs, and how often it actually
+// moves a tunnel off a relay.
+var (
+	metricPromotionAttemptsDirect  = metrics.GetOrRegisterCounter("hostmap.promotion.attempts.direct", nil)
+	metricPromotionAttemptsRelayed = metrics.GetOrRegisterCounter("hostmap.promotion.attempts.relayed", nil)
+	metricPromotionProbes          = metrics.GetOrRegisterCounter("hostmap.promotion.probes", nil)
+	metricPromotionRequeries       = metrics.GetOrRegisterCounter("hostmap.promotion.requeries", nil)
+	metricPromotionRelayToDirect   = metrics.GetOrRegisterCounter("hostmap.promotion.relay_to_direct", nil)
+)
+
 type Relay struct {
 	Type        int
 	State       int
@@ -372,19 +384,71 @@ func (hm *HostMap) reload(c *config.C, initial bool) {
 	}
 }
 
+// relayTypeNames and relayStateNames map the Relay Type/State constants to metric name fragments.
+// Every combination is emitted on each pass, including zeroes, so a bucket that empties reports 0
+// instead of holding its last non-zero value forever.
+var relayTypeNames = map[int]string{
+	Unknowntype:    "unknown",
+	ForwardingType: "forwarding",
+	TerminalType:   "terminal",
+}
+
+var relayStateNames = map[int]string{
+	Requested:      "requested",
+	PeerRequested:  "peer_requested",
+	Established:    "established",
+	Disestablished: "disestablished",
+}
+
 // EmitStats reports host, index, and relay counts to the stats collection system
 func (hm *HostMap) EmitStats() {
+	relayBuckets := make(map[[2]int]int64, len(relayTypeNames)*len(relayStateNames))
+	var directLen, relayedLen, relayUnresolved int64
+
 	hm.RLock()
 	hostLen := len(hm.Hosts)
 	indexLen := len(hm.Indexes)
 	remoteIndexLen := len(hm.RemoteIndexes)
 	relaysLen := len(hm.Relays)
+
+	// A tunnel that completed its handshake over a relay is left without a remote
+	// (see the via.IsRelayed branches in handshake_manager), so remote validity is
+	// what separates a direct tunnel from one still riding a relay.
+	for _, hi := range hm.Hosts {
+		if hi.GetRemote().IsValid() {
+			directLen++
+		} else {
+			relayedLen++
+		}
+	}
+
+	// hm.Relays mixes relays we ride (TerminalType) with relays we forward for others
+	// (ForwardingType), in every state, so the raw length can't answer either question.
+	for idx, relayHI := range hm.Relays {
+		r, ok := relayHI.relayState.QueryRelayForByIdx(idx)
+		if !ok {
+			relayUnresolved++
+			continue
+		}
+		relayBuckets[[2]int{r.Type, r.State}]++
+	}
 	hm.RUnlock()
 
 	metrics.GetOrRegisterGauge("hostmap.main.hosts", nil).Update(int64(hostLen))
 	metrics.GetOrRegisterGauge("hostmap.main.indexes", nil).Update(int64(indexLen))
 	metrics.GetOrRegisterGauge("hostmap.main.remoteIndexes", nil).Update(int64(remoteIndexLen))
 	metrics.GetOrRegisterGauge("hostmap.main.relayIndexes", nil).Update(int64(relaysLen))
+
+	metrics.GetOrRegisterGauge("hostmap.main.tunnels.direct", nil).Update(directLen)
+	metrics.GetOrRegisterGauge("hostmap.main.tunnels.relayed", nil).Update(relayedLen)
+
+	for typ, typName := range relayTypeNames {
+		for state, stateName := range relayStateNames {
+			metrics.GetOrRegisterGauge("hostmap.main.relays."+typName+"."+stateName, nil).
+				Update(relayBuckets[[2]int{typ, state}])
+		}
+	}
+	metrics.GetOrRegisterGauge("hostmap.main.relays.unresolved", nil).Update(relayUnresolved)
 }
 
 // unlockedSetHostsForAddr stores the per-address hostinfo list (list[0] is the primary). An empty
@@ -736,6 +800,15 @@ func (i *HostInfo) TryPromoteBest(preferredRanges []netip.Prefix, ifce *Interfac
 			}
 		}
 
+		// Split the attempt counters by whether we are relayed: a relayed tunnel has no
+		// remote at all, so its probes are the ones that can promote it off the relay.
+		// Comparing these against promotion.relay_to_direct gives the success rate.
+		if remote.IsValid() {
+			metricPromotionAttemptsDirect.Inc(1)
+		} else {
+			metricPromotionAttemptsRelayed.Inc(1)
+		}
+
 		i.remotes.ForEach(preferredRanges, func(addr netip.AddrPort, preferred bool) {
 			if remote.IsValid() && (!addr.IsValid() || !preferred) {
 				return
@@ -743,6 +816,7 @@ func (i *HostInfo) TryPromoteBest(preferredRanges []netip.Prefix, ifce *Interfac
 
 			// Try to send a test packet to that host, this should
 			// cause it to detect a roaming event and switch remotes
+			metricPromotionProbes.Inc(1)
 			ifce.sendTo(header.Test, header.TestRequest, i.ConnectionState, i, addr, []byte(""), make([]byte, 12, 12), make([]byte, mtu))
 		})
 	}
@@ -755,6 +829,7 @@ func (i *HostInfo) TryPromoteBest(preferredRanges []netip.Prefix, ifce *Interfac
 		}
 
 		i.nextLHQuery.Store(now + ifce.reQueryWait.Load())
+		metricPromotionRequeries.Inc(1)
 		ifce.lightHouse.QueryServer(i.vpnAddrs[0])
 	}
 }
@@ -791,6 +866,8 @@ func (i *HostInfo) SetRemoteIfPreferred(hm *HostMap, via ViaSender) bool {
 
 	currentRemote := i.GetRemote()
 	if !currentRemote.IsValid() {
+		// No remote means this tunnel was riding a relay, so gaining one promotes it to direct.
+		metricPromotionRelayToDirect.Inc(1)
 		i.SetRemote(via.UdpAddr)
 		return true
 	}

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/rcrowley/go-metrics"
 	"github.com/slackhq/nebula/config"
 	"github.com/slackhq/nebula/test"
 	"github.com/stretchr/testify/assert"
@@ -400,4 +401,57 @@ func TestHostMap_RelayState(t *testing.T) {
 	h1.relayState.DeleteRelay(a1)
 	assert.Equal(t, []netip.Addr{}, h1.relayState.relays)
 
+}
+
+// TestHostMap_EmitStats_RelayBreakdown covers the tunnel and relay classification EmitStats does.
+// A relayed tunnel is identified by the absence of a remote, and hm.Relays mixes the relays we
+// ride with the ones we forward for others, so both need splitting before the numbers mean anything.
+func TestHostMap_EmitStats_RelayBreakdown(t *testing.T) {
+	l := test.NewLogger()
+	hm := newHostMap(l)
+	f := &Interface{}
+
+	gauge := func(name string) int64 {
+		return metrics.GetOrRegisterGauge(name, nil).Value()
+	}
+	newRelayState := func() RelayState {
+		return RelayState{relayForByAddr: map[netip.Addr]*Relay{}, relayForByIdx: map[uint32]*Relay{}}
+	}
+
+	// A direct tunnel: handshake completed off a relay, so it carries a remote.
+	direct := &HostInfo{vpnAddrs: []netip.Addr{netip.MustParseAddr("0.0.0.1")}, localIndexId: 1, relayState: newRelayState()}
+	remote := netip.MustParseAddrPort("10.0.0.1:4242")
+	direct.remote.Store(&remote)
+	hm.unlockedAddHostInfo(direct, f)
+
+	// A relayed tunnel: no remote was ever set, so it is still riding a relay.
+	relayed := &HostInfo{vpnAddrs: []netip.Addr{netip.MustParseAddr("0.0.0.2")}, localIndexId: 2, relayState: newRelayState()}
+	hm.unlockedAddHostInfo(relayed, f)
+
+	// A relay we ride to reach a peer, and one we forward on someone else's behalf.
+	peer := netip.MustParseAddr("0.0.0.3")
+	relayHI := &HostInfo{vpnAddrs: []netip.Addr{netip.MustParseAddr("0.0.0.9")}, localIndexId: 3, relayState: newRelayState()}
+	// You hold a direct tunnel to your own relay, so it has a remote of its own.
+	relayRemote := netip.MustParseAddrPort("10.0.0.9:4242")
+	relayHI.remote.Store(&relayRemote)
+	relayHI.relayState.InsertRelay(peer, 100, &Relay{Type: TerminalType, State: Established, LocalIndex: 100, PeerAddr: peer})
+	relayHI.relayState.InsertRelay(netip.MustParseAddr("0.0.0.4"), 101, &Relay{Type: ForwardingType, State: Requested, LocalIndex: 101, PeerAddr: netip.MustParseAddr("0.0.0.4")})
+	hm.unlockedAddHostInfo(relayHI, f)
+	hm.Relays[100] = relayHI
+	hm.Relays[101] = relayHI
+	// An index with no backing Relay struct must be reported rather than silently dropped.
+	hm.Relays[102] = relayHI
+
+	hm.EmitStats()
+
+	assert.Equal(t, int64(2), gauge("hostmap.main.tunnels.direct"), "direct tunnel plus the relay hostinfo itself")
+	assert.Equal(t, int64(1), gauge("hostmap.main.tunnels.relayed"))
+	assert.Equal(t, gauge("hostmap.main.hosts"), gauge("hostmap.main.tunnels.direct")+gauge("hostmap.main.tunnels.relayed"))
+
+	assert.Equal(t, int64(1), gauge("hostmap.main.relays.terminal.established"))
+	assert.Equal(t, int64(1), gauge("hostmap.main.relays.forwarding.requested"))
+	assert.Equal(t, int64(1), gauge("hostmap.main.relays.unresolved"))
+	// Buckets that emptied must report zero rather than holding a stale value.
+	assert.Equal(t, int64(0), gauge("hostmap.main.relays.terminal.requested"))
+	assert.Equal(t, int64(0), gauge("hostmap.main.relays.forwarding.established"))
 }

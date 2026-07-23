@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Metrics to show how many tunnels are relayed and how often relayed tunnels recover to a direct
+  path. `hostmap.main.tunnels.direct` and `hostmap.main.tunnels.relayed` split the main hostmap by
+  whether a tunnel still rides a relay. `hostmap.main.relays.<type>.<state>` breaks the existing
+  `hostmap.main.relayIndexes` gauge out by relay type (terminal vs forwarding) and state, which the
+  raw count conflated. `hostmap.promotion.*` counts promotion attempts, probes, lighthouse
+  re-queries, and successful relay to direct transitions.
+
 ## [1.11.0] - 2026-07-23
 
 See the [v1.11.0](https://github.com/slackhq/nebula/milestone/25?closed=1) milestone for a complete list of changes.

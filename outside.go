@@ -282,6 +282,12 @@ func (f *Interface) handleHostRoaming(hostinfo *HostInfo, via ViaSender) {
 			return
 		}
 
+		// An invalid curRemote means the tunnel was relayed and we just received a direct
+		// packet on it, which is the main path by which a relayed tunnel becomes direct.
+		if !curRemote.IsValid() {
+			metricPromotionRelayToDirect.Inc(1)
+		}
+
 		hostinfo.logger(f.l).Info("Host roamed to new udp ip/port.",
 			"udpAddr", curRemote,
 			"newAddr", via.UdpAddr,
