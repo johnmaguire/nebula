@@ -1,0 +1,566 @@
+{
+  "uid": "nebula-relay-health",
+  "title": "Nebula — Relay Health & Promotion",
+  "description": "How much of the mesh is riding relays instead of direct paths, and whether relayed tunnels ever recover. Set the 'prefix' variable to match stats.namespace + stats.subsystem from your nebula config.",
+  "tags": ["nebula", "relay", "networking"],
+  "schemaVersion": 41,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "1m",
+  "editable": true,
+  "graphTooltip": 1,
+  "annotations": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "pluginId": "prometheus",
+        "label": "Prometheus",
+        "includeAll": false,
+        "current": {}
+      },
+      {
+        "name": "prefix",
+        "type": "textbox",
+        "label": "Metric prefix",
+        "description": "Prometheus name prefix built from stats.namespace and stats.subsystem. Empty namespace + subsystem 'nebula' gives 'nebula'.",
+        "query": "nebula",
+        "current": { "text": "nebula", "value": "nebula" },
+        "options": []
+      },
+      {
+        "name": "job",
+        "type": "query",
+        "label": "Job",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(${prefix}_hostmap_main_hosts, job)", "refId": "A" },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {}
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "label": "Instance",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(${prefix}_hostmap_main_hosts{job=~\"$job\"}, instance)", "refId": "A" },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Overview",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Tunnels on a relay",
+      "description": "Share of main-hostmap tunnels with no remote, meaning they completed their handshake over a relay and have not been promoted to a direct path. This is the headline number.",
+      "gridPos": { "x": 0, "y": 1, "w": 5, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"}) / clamp_min(sum(${prefix}_hostmap_main_tunnels_direct{job=~\"$job\", instance=~\"$instance\"}) + sum(${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"}), 1)",
+          "legendFormat": "relayed",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Relayed tunnels",
+      "description": "Absolute count of tunnels currently riding a relay.",
+      "gridPos": { "x": 5, "y": 1, "w": 4, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"})",
+          "legendFormat": "relayed",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "orange" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Direct tunnels",
+      "gridPos": { "x": 9, "y": 1, "w": 4, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(${prefix}_hostmap_main_tunnels_direct{job=~\"$job\", instance=~\"$instance\"})",
+          "legendFormat": "direct",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Promotion success rate",
+      "description": "relay_to_direct transitions divided by promotion attempts on relayed tunnels. TryPromoteBest fires every counters.try_promote packets; its probe only lands if the peer's NAT hole happens to be open, so a low number here means promotion is firing but failing.\n\nCan exceed 100%: relay_to_direct also counts promotions that arrive via ordinary roaming or a re-handshake rather than the probe path.",
+      "gridPos": { "x": 13, "y": 1, "w": 5, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(${prefix}_hostmap_promotion_relay_to_direct{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) / sum(rate(${prefix}_hostmap_promotion_attempts_relayed{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "success rate",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Est. time on a relay (upper bound)",
+      "description": "Little's Law estimate: relayed_tunnels / rate(relay_to_direct). Nebula does not measure relay dwell time directly, so this is DERIVED, not observed.\n\nIt is an upper bound: relayed tunnels also leave the relayed state by being torn down, and that exit path is not in the denominator.\n\n∞ is the meaningful reading of 'if ever' — relayed tunnels exist but nothing is promoting.",
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"}) / sum(rate(${prefix}_hostmap_promotion_relay_to_direct{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "dwell",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 300 },
+              { "color": "red", "value": 1800 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Relay inventory",
+      "gridPos": { "x": 0, "y": 6, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Relays I ride (terminal) by state",
+      "description": "Relays where this node is an endpoint. Requested/peer_requested that never reach established means relay setup itself is failing, which is a different problem from a tunnel that is relayed and stuck.",
+      "gridPos": { "x": 0, "y": 7, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(${prefix}_hostmap_main_relays_terminal_established{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "established" },
+        { "refId": "B", "expr": "sum(${prefix}_hostmap_main_relays_terminal_requested{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "requested" },
+        { "refId": "C", "expr": "sum(${prefix}_hostmap_main_relays_terminal_peer_requested{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "peer_requested" },
+        { "refId": "D", "expr": "sum(${prefix}_hostmap_main_relays_terminal_disestablished{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "disestablished" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 30, "stacking": { "mode": "normal", "group": "A" }, "lineWidth": 1 }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Relays I forward for others (forwarding) by state",
+      "description": "Relay sessions this node carries on behalf of other hosts. This is the capacity side: forwarded traffic is doubled at the relay (in and out), and every one of these breaks at once if this node goes away.",
+      "gridPos": { "x": 8, "y": 7, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(${prefix}_hostmap_main_relays_forwarding_established{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "established" },
+        { "refId": "B", "expr": "sum(${prefix}_hostmap_main_relays_forwarding_requested{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "requested" },
+        { "refId": "C", "expr": "sum(${prefix}_hostmap_main_relays_forwarding_peer_requested{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "peer_requested" },
+        { "refId": "D", "expr": "sum(${prefix}_hostmap_main_relays_forwarding_disestablished{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "disestablished" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 30, "stacking": { "mode": "normal", "group": "A" }, "lineWidth": 1 }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Direct vs relayed tunnels",
+      "description": "Does the relayed band ever drain? A persistent floor with no downward movement is the 'never promotes' signature.",
+      "gridPos": { "x": 16, "y": 7, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(${prefix}_hostmap_main_tunnels_direct{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "direct" },
+        { "refId": "B", "expr": "sum(${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "relayed" },
+        { "refId": "C", "expr": "sum(${prefix}_hostmap_main_relays_unresolved{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "unresolved relay idx (should be 0)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 25, "stacking": { "mode": "normal", "group": "A" }, "lineWidth": 1 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "relayed" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "direct" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "unresolved relay idx (should be 0)" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "custom.stacking", "value": { "mode": "none" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Promotion dynamics — does a relayed tunnel ever move?",
+      "gridPos": { "x": 0, "y": 15, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Promotion attempts vs successes",
+      "description": "The gap between attempts.relayed and relay_to_direct is wasted promotion effort — TryPromoteBest fired and probed, but the tunnel stayed on the relay. attempts.direct is the ordinary preferred-range promotion for tunnels that already had a remote.",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(${prefix}_hostmap_promotion_attempts_relayed{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "attempts (relayed)" },
+        { "refId": "B", "expr": "sum(rate(${prefix}_hostmap_promotion_relay_to_direct{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "relay → direct" },
+        { "refId": "C", "expr": "sum(rate(${prefix}_hostmap_promotion_attempts_direct{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "attempts (already direct)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "fillOpacity": 10, "lineWidth": 2 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "relay → direct" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "attempts (relayed)" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Estimated time on a relay (upper bound)",
+      "description": "Same Little's Law derivation as the overview stat, over time. Spikes to ∞ (rendered as a gap or a very large value) mean relayed tunnels exist and nothing promoted during that window.\n\nThis is not a measured duration. Directly measuring it needs RTT/dwell instrumentation that does not exist yet.",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"}) / sum(rate(${prefix}_hostmap_promotion_relay_to_direct{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "est. dwell time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 10, "lineWidth": 2, "spanNulls": false }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Promotion cost — probes and lighthouse re-queries",
+      "description": "Probes are Test packets sent by TryPromoteBest. Re-queries are the lighthouse queries that actually trigger a fresh HostPunchNotification on the peer — those are the ones that can open a NAT hole, so probes without re-queries mostly cannot promote a relayed tunnel.",
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(${prefix}_hostmap_promotion_probes{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "probes" },
+        { "refId": "B", "expr": "sum(rate(${prefix}_hostmap_promotion_requeries{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "lighthouse re-queries" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "Nodes with the most relayed tunnels",
+      "description": "Which hosts are actually stuck. A node high here with a low promotion success rate is a candidate for punchy.target_all_remotes or a lower counters.requery_every_packets.",
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(20, ${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"} / clamp_min(${prefix}_hostmap_main_tunnels_direct{job=~\"$job\", instance=~\"$instance\"} + ${prefix}_hostmap_main_tunnels_relayed{job=~\"$job\", instance=~\"$instance\"}, 1)",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        { "id": "merge", "options": {} },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "job": true, "__name__": true },
+            "renameByName": { "Value #A": "Relayed tunnels", "Value #B": "Relayed share", "instance": "Instance" }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": { "fields": {}, "sort": [{ "field": "Relayed tunnels", "desc": true }] }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Relayed share" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "decimals", "value": 1 },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 0.05 },
+                    { "color": "red", "value": 0.2 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } }
+    },
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Why the direct path lost",
+      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 1 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Handshake duration percentiles",
+      "description": "Read this one backwards. A relay winning the handshake race makes handshakes complete FASTER, because the relay is pre-warmed while the direct path waits on punchy.delay plus a lighthouse round trip. Falling percentiles alongside a rising relayed count is the signature of relays winning races, not of things improving.",
+      "gridPos": { "x": 0, "y": 33, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "avg(${prefix}_handshakes{job=~\"$job\", instance=~\"$instance\", type=\"mean\"})", "legendFormat": "mean" },
+        { "refId": "B", "expr": "max(${prefix}_handshakes{job=~\"$job\", instance=~\"$instance\", type=\"perc95\"})", "legendFormat": "p95" },
+        { "refId": "C", "expr": "max(${prefix}_handshakes{job=~\"$job\", instance=~\"$instance\", type=\"perc99\"})", "legendFormat": "p99" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ns", "custom": { "fillOpacity": 5, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Handshakes initiated vs timed out",
+      "description": "Timeouts mean neither the direct nor the relay path completed. Rising timeouts point at a reachability problem rather than a relay-preference problem.",
+      "gridPos": { "x": 8, "y": 33, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(${prefix}_handshake_manager_initiated{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "initiated" },
+        { "refId": "B", "expr": "sum(rate(${prefix}_handshake_manager_timed_out{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "timed out" },
+        { "refId": "C", "expr": "sum(${prefix}_hostmap_pending_hosts{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "pending handshakes" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "timed out" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "pending handshakes" },
+            "properties": [{ "id": "unit", "value": "short" }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Hole punching activity",
+      "description": "messages.tx.punchy is the connection-manager keepalive punch. messages.tx.holepunch is the punchy.delay-scheduled punch sent in response to a HostPunchNotification — it is only registered when stats.lighthouse_metrics is true, so a flat zero may just mean that option is off.",
+      "gridPos": { "x": 16, "y": 33, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(${prefix}_messages_tx_punchy{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "punchy (keepalive)" },
+        { "refId": "B", "expr": "sum(rate(${prefix}_messages_tx_holepunch{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "holepunch (needs lighthouse_metrics)" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 40,
+      "type": "text",
+      "title": "Reading this dashboard",
+      "gridPos": { "x": 0, "y": 41, "w": 24, "h": 9 },
+      "options": {
+        "mode": "markdown",
+        "content": "### Setup\n\nSet the **Metric prefix** variable to match your nebula `stats` config. The Prometheus exporter builds names as `namespace_subsystem_metric` with `.` replaced by `_`, so an empty `stats.namespace` plus `stats.subsystem: nebula` gives `nebula`.\n\nnebula's counters are go-metrics counters exported as Prometheus **gauges**. They are monotonic within a process and reset to zero on restart, so `rate()` is still the correct function.\n\n### What is measured vs derived\n\n| Panel | Source |\n|---|---|\n| Relayed / direct tunnel counts | Measured — `hostmap.main.tunnels.*` |\n| Relay inventory by type and state | Measured — `hostmap.main.relays.*` |\n| Promotion attempts, probes, re-queries, successes | Measured — `hostmap.promotion.*` |\n| **Est. time on a relay** | **Derived** — Little's Law, see below |\n\n### The dwell-time estimate\n\nNebula does not time how long a tunnel stays relayed. `relayed_tunnels / rate(relay_to_direct)` estimates the mean, and is an **upper bound**: relayed tunnels also exit by being torn down, and that exit path is not in the denominator. Treat it as an order of magnitude, and read ∞ as \"nothing is promoting right now\".\n\nMeasuring this properly needs per-tunnel dwell instrumentation that does not exist yet.\n\n### Why a tunnel gets stuck\n\n`TryPromoteBest` is gated on a **packet counter**, not a timer — `counters.try_promote` (1000) for probes and `counters.requery_every_packets` (5000, min `timers.requery_wait_duration` apart) for the lighthouse re-query. Only the re-query triggers a fresh `HostPunchNotification` on the peer, so it is the one that can actually open a NAT hole. A low-traffic tunnel accumulates those counters slowly and can sit on a relay indefinitely.\n\nLevers, roughly in order of value:\n\n1. `punchy.delay` lower (e.g. `200ms`) — improves which path wins the initial race, so fewer tunnels need promoting at all.\n2. `punchy.target_all_remotes: true` — keeps holes open on relayed tunnels, so promotion probes land instead of hitting a closed NAT.\n3. `counters.requery_every_packets` / `timers.requery_wait_duration` lower — fires the punch-triggering re-query sooner.\n4. `punchy.respond: true` on hard-NAT nodes — lets the reverse direction establish."
+      }
+    }
+  ]
+}
